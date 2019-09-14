@@ -4,6 +4,7 @@
 #include <string>
 #include "json.hpp"
 #include "PID.h"
+#include <chrono>
 
 // for convenience
 using nlohmann::json;
@@ -30,16 +31,51 @@ string hasData(string s) {
   return "";
 }
 
-int main() {
+/**
+ * To calculate elapsed time between messages
+ */
+//auto t_start = std::chrono::high_resolution_clock::now();
+//auto t_stop = std::chrono::high_resolution_clock::now();
+
+bool enable_tuning = false;
+double throttle = 0.3;
+
+int main(int argc, char *argv[]) {
   uWS::Hub h;
 
-  PID pid;
+
   /**
-   * TODO: Initialize the pid variable.
+   * Get the command line parameters for Kp, Ki, Kd
    */
+  double Kp = 0.2;
+  double Ki = 0.0;
+  double Kd = 3.0;
+
+  // if the arguments are input via cmd line, use them
+  if (argc >= 4) {
+    Kp = atof(argv[1]);
+    Ki = atof(argv[2]);
+    Kd = atof(argv[3]);
+  }
+
+  // enable parameter tuning if requested
+  if (argc >= 5) {
+    enable_tuning = atoi(argv[4]);
+  }
+
+  std::cout << "Kp: " << Kp << "\tKi: " << Ki << "\tKd: " << Kd << std::endl;
+
+  /**
+   * Initialize the pid variable.
+   */
+  PID pid;
+  pid.Init(Kp, Ki, Kd);
+
+//  t_start = std::chrono::high_resolution_clock::now();
 
   h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, 
                      uWS::OpCode opCode) {
+
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -52,25 +88,57 @@ int main() {
         string event = j[0].get<string>();
 
         if (event == "telemetry") {
+
+//          // calculate the elapsed time in seconds since last message, this is
+//          // the time the car has ran on the track since last steering angle update
+//          t_stop = std::chrono::high_resolution_clock::now();
+//          auto t_elapsed_ms = std::chrono::duration_cast<std::chrono::microseconds>(t_stop - t_start);
+//          t_start = t_stop;
+//
+//          double t_elapsed_seconds = t_elapsed_ms.count()/10e6;
+//          std::cout << "**** Elapsed Time: " << t_elapsed_seconds << " Seconds"<< std::endl;
+
           // j[1] is the data JSON object
           double cte = std::stod(j[1]["cte"].get<string>());
           double speed = std::stod(j[1]["speed"].get<string>());
           double angle = std::stod(j[1]["steering_angle"].get<string>());
           double steer_value;
           /**
-           * TODO: Calculate steering value here, remember the steering value is
+           * Calculate steering value here, remember the steering value is
            *   [-1, 1].
            * NOTE: Feel free to play around with the throttle and speed.
            *   Maybe use another PID controller to control the speed!
            */
+
+//          // when the speed goes above 25.0, we enable parameter tuning
+//          if (!pid.IsParameterTuningEnabled() && speed >= 15.0) {
+//            pid.EnableParameterTuning();
+//          }
+          if (enable_tuning){
+            pid.EnableParameterTuning();
+          }
+
+//          pid.UpdateError(cte);
+          pid.Update(cte, angle, speed);
+          steer_value = pid.TotalError();
           
+//          if (speed > 10.0){
+//            if (abs(steer_value) > 0.5) {
+//              throttle -= throttle * abs(steer_value);
+//            } else {
+//              throttle = 0.3;
+//            }
+//          }
+
           // DEBUG
-          std::cout << "CTE: " << cte << " Steering Value: " << steer_value 
+//          std::cout << "CTE: " << cte << " Steering Value: " << steer_value
+//                    << std::endl;
+          std::cout << "CTE: " << cte << " Steering Value: " << steer_value << " Speed: " << speed
                     << std::endl;
 
           json msgJson;
           msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = 0.3;
+          msgJson["throttle"] = throttle; // 0.3;
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
           std::cout << msg << std::endl;
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
